@@ -1,4 +1,4 @@
 streamlit
 openai
-yt-dlp
-ffmpeg-python
+pytube
+moviepy
