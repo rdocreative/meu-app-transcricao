@@ -1,3 +1,2 @@
-streamlit
-openai
-yt-dlp-nightly  # ou yt-dlp>=2025.11.01 (a mais recente anti-bot)
+yt-dlp-nightly
+yt-dlp-youtube-oauth2  # ← essa lib mágica (de https://github.com/coletdjnz/yt-dlp-youtube-oauth2)
