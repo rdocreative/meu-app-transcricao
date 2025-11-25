@@ -1,78 +1,78 @@
 import streamlit as st
 from openai import OpenAI
+from googleapiclient.discovery import build
 import yt_dlp
 import os
+import re
 
-# Chave do secrets
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# Chaves
+openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+youtube = build('youtube', 'v3', developerKey=st.secrets["YOUTUBE_API_KEY"])
 
-st.set_page_config(page_title="Transcrição YouTube", layout="centered")
+st.set_page_config(page_title="Transcrição YouTube + Arquivo", layout="centered")
 st.title("Transcrição de YouTube + Arquivo")
-st.write("Funciona com qualquer vídeo do YouTube (público ou com restrição de idade)")
+st.caption("Funciona com qualquer vídeo (público, restrito ou privado por link)")
 
-# Input YouTube
-youtube_url = st.text_input("Cole o link do YouTube")
+# Input
+url = st.text_input("Link do YouTube")
+uploaded_file = st.file_uploader("Ou upload de áudio/vídeo", type=["mp3","mp4","wav","m4a","webm","mov"])
 
-# Upload manual
-uploaded_file = st.file_uploader("Ou faça upload de um arquivo", 
-                                 type=["mp3", "mp4", "wav", "m4a", "webm", "mov"])
+def extract_video_id(url):
+    regex = r"(?:v=|\/)([0-9A-Za-z_-]{11}).*"
+    match = re.search(regex, url)
+    return match.group(1) if match else None
 
-file_path = None
-title = "Transcrição"
+if url:
+    video_id = extract_video_id(url)
+    if not video_id:
+        st.error("Link inválido")
+        st.stop()
 
-if youtube_url and not uploaded_file:
-    with st.spinner("Baixando áudio do YouTube... (10-60 segundos)"):
+    with st.spinner("Tentando legendas oficiais..."):
         try:
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'quiet': True,
-                'no_warnings': True,
-                'outtmpl': 'temp_audio',
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(youtube_url, download=True)
-                title = info.get('title', 'Vídeo do YouTube')
-                file_path = "temp_audio.mp3"
-            st.success(f"Baixado: **{title}**")
-        except Exception as e:
-            st.error(f"Erro: {str(e)}")
-            st.stop()
+            captions = youtube.captions().list(part="snippet", videoId=video_id).execute()
+            if captions.get("items"):
+                caption_track = max(captions["items"], key=lambda x: x["snippet"]["trackKind"] == "standard" or x["snippet"]["language"] == "pt")
+                download = youtube.captions().download(id=caption_track["id"], tfmt="srt").execute()
+                texto = download.decode('utf-8')
+                # Remove timestamps e números
+                texto_limpo = re.sub(r'\d+\n\d{2}:\d{2}:\d{2},\d{3} --> .*?\n', '', texto)
+                texto_limpo = re.sub(r'\n+', '\n', texto_limpo).strip()
+                
+                st.success("Legendas oficiais encontradas!")
+                st.write(texto_limpo)
+                st.download_button("Baixar (.txt)", texto_limpo, f"{video_id}_oficial.txt")
+                st.stop()
+        except:
+            st.info("Sem legendas oficiais → usando Whisper (mais preciso)")
 
-elif uploaded_file:
-    bytes_data = uploaded_file.read()
-    file_path = f"uploaded_{uploaded_file.name}"
-    with open(file_path, "wb") as f:
-        f.write(bytes_data)
-    title = uploaded_file.name
+    # Fallback: Whisper via yt-dlp
+    with st.spinner("Baixando áudio com Whisper... (10-90 segundos)"):
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3'}],
+            'outtmpl': 'audio',
+            'quiet': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get('title', 'Vídeo')
+        audio_file = "audio.mp3"
 
-# Transcrição
-if file_path and os.path.exists(file_path):
     with st.spinner("Transcrevendo com Whisper..."):
-        with open(file_path, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
+        with open(audio_file, "rb") as f:
+            transcript = openai_client.audio.transcriptions.create(model="whisper-1", file=f)
         texto = transcript.text
 
     st.success("Transcrição pronta!")
     st.subheader(title)
     st.write(texto)
-    
-    st.download_button(
-        label="Baixar transcrição (.txt)",
-        data=texto,
-        file_name=f"{title[:50].replace(' ', '_')}_transcricao.txt",
-        mime="text/plain"
-    )
-    
-    # Limpeza
-    try:
-        os.remove(file_path)
-    except:
-        pass
+    st.download_button("Baixar (.txt)", texto, f"{title[:50]}_whisper.txt")
+    os.remove(audio_file)
+
+elif uploaded_file:
+    with st.spinner("Transcrevendo com Whisper..."):
+        transcript = openai_client.audio.transcriptions.create(model="whisper-1", file=uploaded_file)
+    st.success("Pronto!")
+    st.write(transcript.text)
+    st.download_button("Baixar", transcript.text, "transcricao.txt")
