@@ -3,12 +3,12 @@ from openai import OpenAI
 import yt_dlp
 import os
 
-# Chave da OpenAI via secrets (agora funciona de verdade)
+# Chave da OpenAI via secrets
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 st.set_page_config(page_title="Maestra.ai", layout="centered")
 st.title("🎙️ Maestra.ai - Transcrição de YouTube")
-st.caption("Vídeo do YouTube → Transcrição perfeita em segundos | Funciona com restrição de idade · Shorts · Lives arquivadas")
+st.caption("Vídeo do YouTube → Transcrição perfeita | Agora com login anti-bot (cookies)")
 
 url = st.text_input("Cole o link do YouTube aqui", placeholder="https://www.youtube.com/watch?v=...")
 uploaded_file = st.file_uploader(
@@ -17,19 +17,28 @@ uploaded_file = st.file_uploader(
 )
 
 # =============================================
-# DOWNLOAD DO YOUTUBE (com FFmpeg garantido)
+# DOWNLOAD DO YOUTUBE (com cookies anti-bot)
 # =============================================
 if url:
-    with st.spinner("Baixando o áudio do vídeo... (10-90 segundos)"):
+    with st.spinner("Autenticando e baixando áudio... (10-90 segundos)"):
+        # Carrega cookies se o arquivo existir (bypassa bot check)
+        cookies_path = "cookies.txt"
+        if os.path.exists(cookies_path):
+            st.caption("✅ Cookies carregados (anti-bot ativo)")
+        else:
+            st.warning("⚠️ Cookies não encontrados — teste com vídeo público ou adicione cookies.txt")
+
         ydl_opts = {
-            'format': 'bestaudio/best',           # Pega o melhor áudio disponível
-            'outtmpl': 'audio.%(ext)s',           # Nome com extensão correta
+            'format': 'bestaudio/best',           # Melhor áudio
+            'outtmpl': 'audio.%(ext)s',           # Nome com extensão
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'postprocessors': [{                  # ← AQUI ESTÁ A MÁGICA (usa o ffmpeg que você instalou)
+            'cookies': cookies_path if os.path.exists(cookies_path) else None,  # ← AQUI: autenticação
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',  # ← User-agent humano
+            'postprocessors': [{                  # Extrai áudio com FFmpeg
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',          # mp3 é 100% compatível com Whisper
+                'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
         }
@@ -38,67 +47,64 @@ if url:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 title = info.get('title', 'Vídeo do YouTube')
-            audio_file = "audio.mp3"  # Sempre será esse nome agora
+            audio_file = "audio.mp3"
 
         except Exception as e:
-            st.error("Não foi possível baixar o áudio desse vídeo.")
-            st.caption("Tente outro link ou faça upload manual.")
+            st.error("❌ Erro no download (pode ser bot check ou vídeo privado).")
+            st.caption("Solução: Adicione cookies.txt ou teste vídeo público como https://www.youtube.com/watch?v=dQw4w9WgXcQ")
             st.exception(e)
             audio_file = None
 
     # =============================================
-    # TRANSCRIÇÃO COM WHISPER
+    # TRANSCRIÇÃO
     # =============================================
     if audio_file and os.path.exists(audio_file):
-        with st.spinner("Transcrevendo com Whisper-1 (OpenAI)..."):
+        with st.spinner("Transcrevendo com Whisper-1..."):
             with open(audio_file, "rb") as f:
                 transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=f,
-                    language="pt"  # opcional: força detecção em português (melhora acertos)
+                    language="pt"  # Melhora pra português
                 )
             texto = transcript.text
 
-        st.success("Transcrição concluída! 🎉")
+        st.success("✅ Transcrição pronta! 🎉")
         st.subheader(f"📹 {title}")
         st.write(texto)
         st.download_button(
-            "📥 Baixar transcrição (.txt)",
+            "📥 Baixar (.txt)",
             texto,
             file_name=f"{title[:60].replace(' ', '_')}_transcricao.txt",
             mime="text/plain"
         )
 
-        # Limpa o arquivo temporário
+        # Limpa arquivo
         try:
             os.remove(audio_file)
         except:
             pass
 
     elif audio_file is None:
-        st.error("Falha no download do áudio.")
+        st.error("Falha no download.")
 
 # =============================================
-# UPLOAD MANUAL (funciona sempre)
+# UPLOAD MANUAL
 # =============================================
 elif uploaded_file:
-    with st.spinner("Transcrevendo arquivo enviado..."):
+    with st.spinner("Transcrevendo upload..."):
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
             file=uploaded_file
         )
     texto = transcript.text
-    st.success("Pronto!")
+    st.success("✅ Pronto!")
     st.write(texto)
     st.download_button(
-        "📥 Baixar transcrição",
+        "📥 Baixar",
         texto,
         file_name="transcricao.txt",
         mime="text/plain"
     )
 
-# =============================================
-# RODAPÉ
-# =============================================
 st.markdown("---")
-st.caption("Maestra.ai feito com ❤️ por você · Whisper-1 + yt-dlp + Streamlit · 2025")
+st.caption("Maestra.ai 2025 | Whisper + yt-dlp | Cookies by https://github.com/yt-dlp/yt-dlp")
