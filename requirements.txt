@@ -1,2 +1,3 @@
-yt-dlp-nightly
-yt-dlp-youtube-oauth2  # ← essa lib mágica (de https://github.com/coletdjnz/yt-dlp-youtube-oauth2)
+streamlit
+openai
+yt-dlp
